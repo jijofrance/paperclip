@@ -242,6 +242,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const workspaceContext = parseObject(context.paperclipWorkspace);
   const workspaceCwd = asString(workspaceContext.cwd, "");
   const workspaceSource = asString(workspaceContext.source, "");
+  const workspaceStrategy = asString(workspaceContext.strategy, "");
   const workspaceId = asString(workspaceContext.workspaceId, "");
   const workspaceRepoUrl = asString(workspaceContext.repoUrl, "");
   const workspaceRepoRef = asString(workspaceContext.repoRef, "");
@@ -312,6 +313,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     envConfig,
     workspaceCwd: effectiveWorkspaceCwd,
     workspaceSource,
+    workspaceStrategy,
     workspaceId,
     workspaceRepoUrl,
     workspaceRepoRef,

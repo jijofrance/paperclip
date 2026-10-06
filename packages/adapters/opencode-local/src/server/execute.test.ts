@@ -191,13 +191,22 @@ describe("OpenCode local skill injection", () => {
           command: commandPath,
           cwd: workspace,
           model,
+          managedAiConnection: { provider: "openrouter", method: "api_key", identity: "fixture" },
           env: {
             OPENROUTER_API_KEY: apiKey,
             OPENCODE_ALLOW_ALL_MODELS: "1",
           },
           promptTemplate: "Run the task.",
         },
-        context: {},
+        context: {
+          taskId: "task-openrouter",
+          paperclipWorkspace: {
+            cwd: workspace,
+            source: "task_session",
+            strategy: "git_worktree",
+            workspaceId: "workspace-openrouter",
+          },
+        },
         authToken: "run-jwt-token",
         onLog: async (_stream, chunk) => {
           logs.push(chunk);
@@ -212,7 +221,13 @@ describe("OpenCode local skill injection", () => {
       const executionCall = runProcessMock.mock.calls.at(-1)!;
       expect(executionCall[3]).toContain("--model");
       expect(executionCall[3]).toContain(model);
-      expect((executionCall[4] as { env: Record<string, string> }).env.OPENROUTER_API_KEY).toBe(apiKey);
+      const executionEnv = (executionCall[4] as { env: Record<string, string> }).env;
+      expect(executionEnv.OPENROUTER_API_KEY).toBe(apiKey);
+      expect(executionEnv.PAPERCLIP_TASK_ID).toBe("task-openrouter");
+      expect(executionEnv.PAPERCLIP_WORKSPACE_SOURCE).toBe("task_session");
+      expect(executionEnv.PAPERCLIP_WORKSPACE_STRATEGY).toBe("git_worktree");
+      expect(executionEnv.PAPERCLIP_WORKSPACE_ID).toBe("workspace-openrouter");
+      expect(executionEnv.PAPERCLIP_WORKSPACE_CWD).toBe(workspace);
       expect(JSON.stringify({ logs, metadata, result })).not.toContain(apiKey);
       expect(JSON.stringify(metadata)).toContain('"OPENROUTER_API_KEY":"***REDACTED***"');
     } finally {

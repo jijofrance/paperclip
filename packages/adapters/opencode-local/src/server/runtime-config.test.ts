@@ -321,4 +321,65 @@ describe("prepareOpenCodeRuntimeConfig", () => {
     expect(prepared.notes).toEqual([]);
     await prepared.cleanup();
   });
+
+  it("scopes managed credential runs to the assigned isolated Git worktree", async () => {
+    const configHome = await makeConfigHome({
+      permission: { read: "allow", external_directory: "allow" },
+    });
+    const workspaceParent = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-managed-worktree-"));
+    cleanupPaths.add(workspaceParent);
+    const workspaceCwd = path.join(workspaceParent, "assigned-worktree");
+    await fs.mkdir(workspaceCwd);
+
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: {
+        XDG_CONFIG_HOME: configHome,
+        PAPERCLIP_TASK_ID: "task-1",
+        PAPERCLIP_WORKSPACE_ID: "workspace-1",
+        PAPERCLIP_WORKSPACE_SOURCE: "task_session",
+        PAPERCLIP_WORKSPACE_STRATEGY: "git_worktree",
+        PAPERCLIP_WORKSPACE_CWD: workspaceCwd,
+      },
+      // A false saved skip-permissions setting is preserved; the runtime grants
+      // only the server-derived assigned worktree and asks for other paths.
+      config: { dangerouslySkipPermissions: false, managedAiConnection: { provider: "openrouter" } },
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const runtimeConfig = JSON.parse(
+      await fs.readFile(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"), "utf8"),
+    ) as { permission: Record<string, unknown> };
+
+    expect(runtimeConfig.permission).toMatchObject({
+      read: "allow",
+      external_directory: {
+        "*": "ask",
+        [workspaceCwd]: "allow",
+        [path.join(workspaceCwd, "**")]: "allow",
+      },
+    });
+    expect(prepared.notes).toContain(
+      "Restricted managed OpenCode external-directory access to the assigned isolated task worktree.",
+    );
+    await prepared.cleanup();
+  });
+
+  it("keeps managed external-directory access at ask without an assigned worktree", async () => {
+    const configHome = await makeConfigHome({ permission: { external_directory: "allow" } });
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome, PAPERCLIP_TASK_ID: "task-1" },
+      // Even when the legacy skip-permissions setting is true, managed auth
+      // cannot retain a broad external-directory allow without trusted scope.
+      config: { dangerouslySkipPermissions: true, managedAiConnection: { provider: "openrouter" } },
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const runtimeConfig = JSON.parse(
+      await fs.readFile(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"), "utf8"),
+    ) as { permission: Record<string, unknown> };
+
+    expect(runtimeConfig.permission.external_directory).toBe("ask");
+    expect(prepared.notes).toContain(
+      "Managed OpenCode external-directory access remains ask because no assigned isolated Git worktree was resolved.",
+    );
+    await prepared.cleanup();
+  });
 });

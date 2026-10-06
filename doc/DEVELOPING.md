@@ -964,6 +964,12 @@ OpenCode retains `allow`, `ask`, and `deny`; ACPX retains `approve-all`,
 otherwise stores the shared `gpt-5.6-sol` default. The native execution boundary
 applies the same default to older runner rows whose model is missing or blank.
 
+For local OpenCode runs that use a managed AI connection, Paperclip scopes
+`external_directory` access to the assigned isolated Git worktree. Other paths
+remain `ask`; if Paperclip cannot resolve that worktree, no path is auto-allowed.
+The local OpenCode run uses the per-run runtime config. This rule does not
+change the saved permission setting or managed provider credentials.
+
 For native Codex runs, Paperclip passes the resolved execution workspace as
 `PAPERCLIP_WORKSPACE_CWD` and uses it as the provider containment boundary. A
 workspace below the host `HOME` is valid, including the default projectless

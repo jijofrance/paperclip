@@ -108,7 +108,8 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   targetIsRemote?: boolean;
 }): Promise<PreparedOpenCodeRuntimeConfig> {
   const skipPermissions = asBoolean(input.config.dangerouslySkipPermissions, true);
-  if (!skipPermissions) {
+  const managedAiConnection = Boolean(input.config.managedAiConnection);
+  if (!managedAiConnection && !skipPermissions) {
     return {
       env: input.env,
       notes: [],
@@ -127,6 +128,39 @@ export async function prepareOpenCodeRuntimeConfig(input: {
       notes: [],
       cleanup: async () => {},
     };
+  }
+
+  // Managed credentials must not turn OpenCode's external-directory permission
+  // into a global allow. Paperclip refreshes these workspace variables from the
+  // server-owned execution workspace before calling this helper; require the
+  // task-session + git-worktree identity as well as the current task and workspace
+  // IDs before granting this one local tree. Resolve symlinks so the allow rule
+  // names the actual assigned worktree directory.
+  let managedExternalDirectoryPermission: Record<string, string> | "ask" | null = null;
+  if (managedAiConnection) {
+    const workspaceCwd = input.env.PAPERCLIP_WORKSPACE_CWD?.trim();
+    const hasAssignedGitWorktree =
+      input.env.PAPERCLIP_WORKSPACE_SOURCE === "task_session" &&
+      input.env.PAPERCLIP_WORKSPACE_STRATEGY === "git_worktree" &&
+      Boolean(input.env.PAPERCLIP_WORKSPACE_ID?.trim()) &&
+      Boolean(input.env.PAPERCLIP_TASK_ID?.trim()) &&
+      Boolean(workspaceCwd && path.isAbsolute(workspaceCwd));
+    if (hasAssignedGitWorktree) {
+      try {
+        const canonicalWorkspaceCwd = await fs.realpath(workspaceCwd!);
+        if ((await fs.stat(canonicalWorkspaceCwd)).isDirectory()) {
+          managedExternalDirectoryPermission = {
+            "*": "ask",
+            [canonicalWorkspaceCwd]: "allow",
+            [path.join(canonicalWorkspaceCwd, "**")]: "allow",
+          };
+        }
+      } catch {
+        // A missing or unreadable execution workspace must not fall back to a
+        // broad permission rule. OpenCode will keep asking for outside paths.
+      }
+    }
+    managedExternalDirectoryPermission ??= "ask";
   }
 
   const sourceConfigDir = path.join(resolveXdgConfigHome(input.env), "opencode");
@@ -152,9 +186,15 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   const existingPermission = isPlainObject(existingConfig.permission)
     ? existingConfig.permission
     : {};
-  const notes = [
-    "Injected runtime OpenCode config with permission.external_directory=allow to avoid headless approval prompts.",
-  ];
+  const notes = managedAiConnection
+    ? [
+        managedExternalDirectoryPermission === "ask"
+          ? "Managed OpenCode external-directory access remains ask because no assigned isolated Git worktree was resolved."
+          : "Restricted managed OpenCode external-directory access to the assigned isolated task worktree.",
+      ]
+    : [
+        "Injected runtime OpenCode config with permission.external_directory=allow to avoid headless approval prompts.",
+      ];
 
   // Merge gateway/custom provider definitions supplied via PAPERCLIP_OPENCODE_PROVIDERS
   // (a JSON object in OpenCode's `provider` shape). OpenCode resolves a `--model
@@ -209,7 +249,9 @@ export async function prepareOpenCodeRuntimeConfig(input: {
     ...existingConfig,
     permission: {
       ...existingPermission,
-      external_directory: "allow",
+      external_directory: managedAiConnection
+        ? managedExternalDirectoryPermission
+        : "allow",
     },
   };
   if (Object.keys(nextProvider).length > 0) {
